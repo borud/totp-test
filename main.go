@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 var mu sync.Mutex
 var accounts = make(map[string]*otp.Key)
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+var allWHiteSpaceRegex = regexp.MustCompile(`\s+`)
 
 const issuer = "totp-issuer@example.com"
 
@@ -29,11 +31,12 @@ func main() {
 	m := mux.NewRouter()
 
 	m.HandleFunc("/", mainHandler).Methods("GET")
-	m.HandleFunc("/login/{username}", loginHandler).Methods("GET")
+	m.HandleFunc("/login/{username}", loginPageHandler).Methods("GET")
 	m.HandleFunc("/new", generateNewHandler).Methods("GET")
 	m.HandleFunc("/generate", generateHandler).Methods("GET")
 	m.HandleFunc("/verify", verifyHandler).Methods("POST")
 	m.HandleFunc("/success", successHandler).Methods("GET")
+	m.HandleFunc("/fail", failHandler).Methods("GET")
 
 	server := &http.Server{
 		Handler:      m,
@@ -56,6 +59,11 @@ func mainHandler(w http.ResponseWriter, r *http.Request) {
 func successHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprint(w, "Success, go back to <a href=\"/\">main page</a>")
+}
+
+func failHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprint(w, "FAILED - back to <a href=\"/\">main page</a>")
 }
 
 func generateNewHandler(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +139,8 @@ func verifyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	key = allWHiteSpaceRegex.ReplaceAllString(key, "")
+
 	mu.Lock()
 	defer mu.Unlock()
 	userKey, ok := accounts[username]
@@ -141,16 +151,16 @@ func verifyHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("username = '%s', key = '%s', userKey = '%s'", username, key, userKey)
 
-	result := totp.Validate(key, userKey.Secret())
-	if result {
-		http.Error(w, "invalid key", http.StatusUnauthorized)
+	valid := totp.Validate(key, userKey.Secret())
+	if valid {
+		http.Redirect(w, r, "/success", http.StatusFound)
 		return
 	}
 
-	http.Redirect(w, r, "/success", 301)
+	http.Redirect(w, r, "/fail", http.StatusFound)
 }
 
-func loginHandler(w http.ResponseWriter, r *http.Request) {
+func loginPageHandler(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	username := params["username"]
 
